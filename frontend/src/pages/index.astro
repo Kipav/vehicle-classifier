@@ -1,0 +1,189 @@
+---
+import "./styles/global.css";
+---
+
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<meta name="viewport" content="width=device-width" />
+		<meta name="generator" content={Astro.generator} />
+		<title>Vehicle Image Classifier</title>
+		<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+	</head>
+	<body class="py-10 px-4 md:px-20 w-full">
+		<h1 class="text-4xl font-bold text-center pb-10">Vehicle Image Classifier</h1>
+		<div class="flex flex-col gap-10">
+			<div class="flex flex-col gap-4 align-middle items-center">
+				<h2 class="text-2xl font-bold">Model</h2>
+				<select id="modelSelect" class="px-2 py-2 border rounded-lg h-fit">
+					<option value="MobileNetV2_tfjs/model.json">MobileNetV2</option>
+				</select>
+				<span id="modelStatus" class="text-sm text-gray-600">Loading model...</span>
+			</div>
+			<div class="flex flex-col gap-2 items-center">
+				<h2 class="text-2xl font-bold">Image</h2>
+				<div id="imageContainer" class="border w-full aspect-square md:w-128 items-center">
+					<input type="file" class="hidden" id="imageInput" accept="image/*">
+					<label for="imageInput" class="w-full h-full flex items-center justify-center cursor-pointer">
+						<img id="preview" class="w-full h-full object-contain hidden" />
+						<span id="uploadText">Click to upload image</span>
+					</label>
+				</div>
+			</div>
+			<div class="flex flex-col gap-4 items-center">
+				<div class="flex flex-row gap-2 align-middle">
+					<button id="predictBtn" class="px-4 py-2 bg-blue-500 text-white rounded-lg h-fit hover:bg-blue-600 cursor-pointer" disabled>Predict</button>
+					<div id="loadingSpinner" class="hidden ml-2">
+						<div class="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-900"></div>
+					</div>
+				</div>
+				<div id="prediction" class="text-xl hidden">
+					<span class="font-bold">Prediction: </span>
+					<span id="predictionResult"></span>
+				</div>
+			</div>
+		</div>
+		<script>
+			declare const tf: typeof import('@tensorflow/tfjs');
+			
+			let model: import('@tensorflow/tfjs').LayersModel | null = null;
+			let isModelLoading = false;
+			let isModelLoaded = false;
+
+			const CLASS_LABELS = [
+				"Bicycle",
+				"Boat",
+				"Bus",
+				"Car",
+				"Helicopter",
+				"Minibus",
+				"Motorcycle",
+				"Taxi",
+				"Train",
+				"Truck"
+			];
+
+			const modelSelect = document.getElementById('modelSelect') as HTMLSelectElement;
+			const modelStatus = document.getElementById('modelStatus') as HTMLSpanElement;
+			const predictBtn = document.getElementById('predictBtn') as HTMLButtonElement;
+			const loadingSpinner = document.getElementById('loadingSpinner') as HTMLDivElement;
+
+			window.addEventListener('DOMContentLoaded', () => {
+				loadModel();  
+			});
+
+			async function loadModel() {
+				if (isModelLoading) return;
+				
+				isModelLoading = true;
+				isModelLoaded = false;
+				const modelPath = `/models/${modelSelect.value}`;
+				
+				if (predictBtn) predictBtn.disabled = true;
+				if (modelStatus) modelStatus.textContent = "Loading model...";
+				
+				try {
+					model = await tf.loadLayersModel(modelPath);
+					
+					const dummyTensor = tf.zeros([1, 128, 128, 3]);
+					await model.predict(dummyTensor);
+					dummyTensor.dispose();
+					
+					console.log('Model loaded and warmed up');
+					if (modelStatus) {
+						modelStatus.textContent = "Model ready";
+						modelStatus.className = "text-sm text-green-500";
+					}
+					if (predictBtn) predictBtn.disabled = false;
+					isModelLoaded = true;
+				} catch (error) {
+					console.error('Error loading model:', error);
+					if (modelStatus) modelStatus.textContent = "Error loading model";
+				} finally {
+					isModelLoading = false;
+				}
+			}
+
+			if (modelSelect) {
+				modelSelect.addEventListener('change', loadModel);
+			}
+
+			const imageInput = document.getElementById('imageInput') as HTMLInputElement;
+			const preview = document.getElementById('preview') as HTMLImageElement;
+			const uploadText = document.getElementById('uploadText');
+			const imageContainer = document.getElementById('imageContainer');
+			const prediction = document.getElementById('prediction');
+			const predictionResult = document.getElementById('predictionResult');
+
+			if (imageInput && preview && uploadText && imageContainer) {
+				imageInput.addEventListener('change', function(e) {
+					const target = e.target as HTMLInputElement;
+					const file = target.files?.[0];
+					if (file) {
+						const reader = new FileReader();
+						reader.onload = function(e) {
+							const result = e.target?.result as string;
+							preview.src = result;
+							preview.classList.remove('hidden');
+							uploadText.classList.add('hidden');
+							imageContainer.classList.add("bg-black");
+							imageContainer.classList.remove("border");
+							
+							if (prediction) {
+								prediction.classList.add('hidden');
+							}
+						}
+						reader.readAsDataURL(file);
+					}
+				});
+			}
+
+			if (predictBtn && preview && prediction && predictionResult) {
+				predictBtn.addEventListener('click', async () => {
+					if (!model || !isModelLoaded) {
+						alert('Model not loaded yet. Please wait.');
+						return;
+					}
+
+					if (preview.src) {
+						try {
+							if (loadingSpinner) loadingSpinner.classList.remove('hidden');
+							if (predictBtn) predictBtn.disabled = true;
+							
+							const tensor = tf.browser.fromPixels(preview)
+								.resizeNearestNeighbor([128, 128]) // MobileNetV2 input size
+								.toFloat()
+								.expandDims();
+							
+							const normalized = tensor.div(255.0);
+							
+							const predictions = await model.predict(normalized);
+							const predictionsAsTensor = predictions as any;
+							const probabilities = await predictionsAsTensor.arraySync() as number[][];
+							const flatProbs = probabilities[0];
+							const maxProbability = Math.max(...flatProbs);
+							const predictedClass = flatProbs.indexOf(maxProbability);
+							
+							prediction.classList.remove('hidden');
+							const className = CLASS_LABELS[predictedClass] || `Unknown (Class ${predictedClass})`;
+							predictionResult.textContent = `${className} (${(maxProbability * 100).toFixed(2)}% confidence)`;
+
+							tensor.dispose();
+							normalized.dispose();
+							predictionsAsTensor.dispose();
+						} catch (error) {
+							console.error('Error during prediction:', error);
+							alert('Error making prediction. Please try again.');
+						} finally {
+							if (loadingSpinner) loadingSpinner.classList.add('hidden');
+							if (predictBtn) predictBtn.disabled = false;
+						}
+					} else {
+						alert('Please upload an image first.');
+					}
+				});
+			}
+		</script>
+	</body>
+</html>
