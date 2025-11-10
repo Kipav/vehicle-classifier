@@ -1,0 +1,1 @@
+https://vehicleclassifier.vercel.app/
