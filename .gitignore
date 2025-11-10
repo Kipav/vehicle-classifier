@@ -11,15 +11,6 @@ frontend/pnpm-debug.log*
 frontend/.env
 frontend/.env.production
 
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.ipynb_checkpoints/
-.Python
-venv/
-env/
-
 .vscode/
 .idea/
 *.swp
